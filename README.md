@@ -16,7 +16,7 @@
 
 ![普通对话条任务完成](screenshots/conversation-windows.png)
 
-![原生目标实际达到计数 2](screenshots/target-completed-windows.png)
+![原生目标实际达到计数 2](screenshots/target-completed-windows.jpg)
 
 ## 许可
 
