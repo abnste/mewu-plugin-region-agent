@@ -8,7 +8,7 @@
 
 在 Mewu 的插件市场搜索 **区域操作 Agent**，核对本项目源码后安装。已有版本的发行资产保留在[社区市场发行页](https://github.com/abnste/mewu-plugins/releases)，不变更用户现有的更新来源。
 
-本仓库根目录的 mewu-plugin.json 与 index.mjs 是可独立打包的完整插件源码，无须修改 Mewu 核心。[SDK](https://github.com/abnste/mewu_ai/tree/next/packages/sdk) · [打包与 GitHub 投稿](https://github.com/abnste/mewu_ai/tree/next/tools/extension-market)
+本仓库根目录的 mewu-plugin.json 与 index.mjs 是可独立打包的完整插件源码，无须修改 Mewu 核心。[Mewu API SDK](https://github.com/abnste/mewu_ai/tree/master/packages/sdk) · [打包与 GitHub 投稿](https://github.com/abnste/mewu_ai/tree/master/tools/extension-market)
 
 ## 实际效果
 
