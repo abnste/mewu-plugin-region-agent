@@ -65,6 +65,7 @@ function decision(content, frame) {
   let value;
   try { value = JSON.parse(fenced ? fenced[1] : text); }
   catch { return { error: 'response_json_invalid' }; }
+  if (keys(value, ['observe']) && value.observe === true) return { value };
   if (keys(value, ['done', 'message']) && value.done === true && typeof value.message === 'string' &&
       value.message.trim().length > 0 && value.message.length <= 2000) return { value };
   if (!keys(value, ['action'])) return { error: 'response_shape_invalid' };
@@ -74,7 +75,7 @@ function decisionPrompt(task, frame, history, correction) {
   return `在用户授权的应用区域完成任务：${task}\n` +
     `当前截图宽 ${frame.width}、高 ${frame.height} 像素。x 必须为 0 到 ${frame.width - 1} 的整数，` +
     `y 必须为 0 到 ${frame.height - 1} 的整数；不是全局屏幕坐标。\n` +
-    '只返回一个完整 JSON 对象，不要解释。顶层只能是 {"action":动作对象} 或 {"done":true,"message":"简短结果"}。\n' +
+    '只返回一个完整 JSON 对象，不要解释。顶层只能是 {"action":动作对象}、{"observe":true} 或 {"done":true,"message":"简短结果"}。\n' +
     '以下每行均为格式示例，坐标必须依据截图选择，不要照抄示例坐标：\n' +
     '{"action":{"kind":"click","x":0,"y":0}}\n' +
     '{"action":{"kind":"doubleClick","x":0,"y":0}}\n' +
@@ -85,6 +86,7 @@ function decisionPrompt(task, frame, history, correction) {
     '拖动路径为 2 至 256 个图内坐标，累计移动不超过 8192 像素。滚动量是 -1200 至 1200 的非零整数。\n' +
     '文本最多 4096 个 UTF-8 字节且不能含控制字符；按键只支持 enter、backspace、delete、arrowLeft、arrowRight、arrowUp、arrowDown、home、end。\n' +
     '每次只执行一个动作，根据下一张新截图确认效果。输入框必须完整在选区内；不要操作应用之外的内容。\n' +
+    '应用更新可能晚于输入送达；若上一动作的效果尚未出现，返回 {"observe":true} 获取另一张新截图，不要重复点击或输入，也不要仅凭第一张未变化的图断言失败。观察也占用本次步骤预算。\n' +
     `已执行：${JSON.stringify(history)}` +
     (correction ? `\n上次输出未通过验证（${correction}），尚未执行该动作。请依据同一张截图重新返回严格符合上述结构的 JSON；不得添加字段或只返回内部动作。` : '');
 }
@@ -120,6 +122,11 @@ export default definePlugin(ctx => {
         if (!next) return { isError: true, content: '模型连续返回无效操作，已停止', steps: history.length,
           artifactId: frame.artifactId, completed: false, stopReason: 'invalid_model_decision' };
         if (next.done === true) return { content: next.message, steps: history.length, artifactId: frame.artifactId, completed: true };
+        if (next.observe === true) {
+          phase = 'feedback';
+          frame = await ctx.region.observe(context.regionId);
+          continue;
+        }
         // Neither target coordinates nor screenshot pixels are supplied by Mewu
         // core: the independent plugin interprets this model decision itself.
         phase = 'action';
@@ -135,16 +142,33 @@ export default definePlugin(ctx => {
       // the host journal; never invite the parent Agent to replay the action.
       if (phase === 'action') throw error;
       const reasons = {
+        region_accessibility_permission: '请在 macOS 系统设置的隐私与安全性中，为 MewuAI 开启辅助功能后重新发起',
         region_window_boundary: '选区跨出了目标窗口，请重新框选同一窗口',
         region_target_changed: '目标窗口已改变或失去焦点，请回到目标窗口后重新发起',
         region_target_obscured: '操作区域被其他窗口遮挡，请移开遮挡后重新发起',
         region_too_large: '操作选区过大，请缩小选区后重新发起',
         region_authority_revoked: '本次区域操作已停止',
         region_input_busy: '鼠标或修饰键仍被按住，请松开后重新发起',
+        region_capture_failed: '目标区域的新截图未能完成，请重新截图后发起',
+        region_display_changed: '显示器或屏幕比例已改变，请重新截图后发起',
+        region_source_changed: '引用的截图或选区已改变，请重新引用后发起',
+        region_source_invalid: '此引用没有有效的屏幕坐标，请重新截图后发起',
+        region_source_missing: '原截图已不可用，请重新截图后发起',
+        region_coordinates_unavailable: '无法确认当前屏幕坐标，请重新截图后发起',
+        region_platform_unsupported: '当前桌面尚不支持区域操作',
+        region_busy: '已有区域操作尚未结束，请先停止它',
+        overlay_hide_failed: '截图浮层未能收起，未发出输入动作',
+        region_focus_outside: '输入焦点不在授权选区内，请重新框选输入框后发起',
+        region_secure_input: '系统保护的输入框不能由区域操作填写',
+        region_keyboard_focus_denied: '无法确认授权选区内的输入焦点',
+        region_observation_required: '操作前未取得有效的新截图，已停止',
+        region_stopped: '本次区域操作已停止',
+        region_stop_unavailable: '停止控制未能启用，未发出输入动作',
+        region_desktop_witness_unavailable: '请启用当前 GNOME 桌面的 Mewu Desktop Witness 后重新发起',
         MODEL_REQUEST_FAILED: '区域操作的模型请求失败',
       };
       const code = Object.prototype.hasOwnProperty.call(reasons, error?.code) ? error.code : 'region_observation_failed';
-      return { isError: true, completed: false, stopReason: code, steps: history.length,
+      return { isError: true, completed: false, retryable: false, stopReason: code, steps: history.length,
         content: (reasons[code] || '无法读取当前区域，操作已停止') +
           (phase === 'feedback' ? '；上一动作已执行但未取得反馈，不要重复该动作。' : '；本次未发出新的输入动作。'),
         ...(frame ? { artifactId: frame.artifactId } : {}),

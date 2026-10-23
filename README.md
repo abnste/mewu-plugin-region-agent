@@ -2,7 +2,7 @@
 
 在 Mewu 原有截图界面框选区域，直接在对话条输入任务。插件通过模型观察当前区域、执行一个动作，再用新截图决定下一步。
 
-当前原生输入适配器仅支持 Windows；macOS 和 Linux 仍可截图问答。需启用插件并配置支持图像和工具调用的模型。Esc 或停止会撤销后续动作。
+原生输入支持 Windows、macOS 与 GNOME 50 Wayland x64；具体系统权限与 Linux 桌面限制见下方 0.1.4 说明。需启用插件并配置支持图像和工具调用的模型。Esc 或停止会撤销后续动作。
 
 ## 安装与开发
 
@@ -31,3 +31,15 @@
 ## 许可
 
 MPL-2.0，与 Mewu 一致。
+
+## 0.1.4：三端区域操作
+
+需要 MewuAI 1.0.5 或更新版本。Windows、macOS、GNOME 50 Wayland x64 复用同一份插件代码，由宿主提供原生坐标、输入与截图适配。macOS 需要录屏与辅助功能权限；Linux 需要 [Mewu Desktop Witness](https://github.com/abnste/mewu_ai/tree/master/tools/linux-desktop-witness) 和系统 Portal 当次授权，其他 Linux 桌面尚不支持区域输入。
+
+直接在 Mewu 对话条引用选区并发送任务。插件每次依据截图决定一个动作，随后取得新截图；页面尚未更新时可仅重新观察，不重复输入。停止、失去目标、密码框或结果未知时不会盲目重放。
+
+下面是真实桌面上的输入、确认与计数结果。
+
+![macOS 实测](screenshots/macos-region-014.png)
+
+![Ubuntu Wayland 实测](screenshots/ubuntu-region-014.png)
