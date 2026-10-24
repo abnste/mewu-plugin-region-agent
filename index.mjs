@@ -71,9 +71,35 @@ function decision(content, frame) {
   if (!keys(value, ['action'])) return { error: 'response_shape_invalid' };
   return validAction(value.action, frame) ? { value } : { error: 'action_invalid' };
 }
+// A delivery receipt does not mean an application has finished updating.
+// Do not repeat an identical non-idempotent input on unchanged visual evidence.
+function duplicatePendingAction(action, frame, previous) {
+  if (!previous || !/^[a-f0-9]{64}$/i.test(frame.sha256 || '') ||
+      previous.beforeSha256 !== frame.sha256 || previous.feedbackSha256 !== frame.sha256) return false;
+  const old = previous.action;
+  if (action.kind !== old.kind) return false;
+  if (action.kind === 'click' || action.kind === 'doubleClick') return action.x === old.x && action.y === old.y;
+  return action.kind === 'type' && action.text === old.text;
+}
+function completion(content) {
+  if (typeof content !== 'string' || content.length > 65536) return null;
+  const text = content.trim(), fenced = /^```(?:json)?\s*\n([\s\S]*)\n```$/i.exec(text);
+  try {
+    const value = JSON.parse(fenced ? fenced[1] : text);
+    return keys(value, ['complete', 'message']) && typeof value.complete === 'boolean' &&
+      typeof value.message === 'string' && value.message.trim().length > 0 && value.message.length <= 2000 ? value : null;
+  } catch { return null; }
+}
+function completionPrompt(task, frame, history, proposal) {
+  return `只核验用户任务是否已完成，不执行任何动作。任务：${task}\n` +
+    `这是刚重新取得的截图，宽 ${frame.width}、高 ${frame.height}。实际输入记录：${JSON.stringify(history)}\n` +
+    `上一轮提出的结果（不代表事实）：${proposal}\n` +
+    '以本张截图中可见的实际文字、数字和状态核对任务的全部条件。不能根据已经点击或输入推断成功，不能把停止操作等同任务完成。' +
+    '条件不符、无法辨认或证据不足必须返回 false，并简短说明实际状态。只返回一个 JSON：{"complete":true,"message":"实际结果"} 或 {"complete":false,"message":"未满足的条件"}。';
+}
 function decisionPrompt(task, frame, history, correction) {
   return `在用户授权的应用区域完成任务：${task}\n` +
-    `当前截图宽 ${frame.width}、高 ${frame.height} 像素。x 必须为 0 到 ${frame.width - 1} 的整数，` +
+    `当前截图 SHA256 ${frame.sha256}，宽 ${frame.width}、高 ${frame.height} 像素。x 必须为 0 到 ${frame.width - 1} 的整数，` +
     `y 必须为 0 到 ${frame.height - 1} 的整数；不是全局屏幕坐标。\n` +
     '只返回一个完整 JSON 对象，不要解释。顶层只能是 {"action":动作对象}、{"observe":true} 或 {"done":true,"message":"简短结果"}。\n' +
     '以下每行均为格式示例，坐标必须依据截图选择，不要照抄示例坐标：\n' +
@@ -114,15 +140,30 @@ export default definePlugin(ctx => {
         // never replayed after an action or observation failure.
         for (let attempt = 0; attempt < 3; attempt++) {
           phase = 'model';
-          const reply = await ctx.model.invoke({ prompt: decisionPrompt(task, frame, history, correction), images: [frame.artifactId] });
+          const reply = await ctx.model.invoke({ messages: [], prompt: decisionPrompt(task, frame, history, correction), images: [frame.artifactId] });
           const parsed = decision(reply.content, frame);
           if (parsed.value) { next = parsed.value; break; }
           correction = parsed.error;
         }
         if (!next) return { isError: true, content: '模型连续返回无效操作，已停止', steps: history.length,
           artifactId: frame.artifactId, completed: false, stopReason: 'invalid_model_decision' };
-        if (next.done === true) return { content: next.message, steps: history.length, artifactId: frame.artifactId, completed: true };
+        if (next.done === true) {
+          phase = 'feedback';
+          frame = await ctx.region.observe(context.regionId);
+          phase = 'model';
+          const reply = await ctx.model.invoke({ messages: [], prompt: completionPrompt(task, frame, history, next.message), images: [frame.artifactId] });
+          const verified = completion(reply.content);
+          if (!verified || !verified.complete) return { isError: true, completed: false, steps: history.length,
+            artifactId: frame.artifactId, stopReason: 'completion_unconfirmed',
+            content: verified?.message || '无法核验实际结果，任务尚未确认完成' };
+          return { content: verified.message, steps: history.length, artifactId: frame.artifactId, completed: true };
+        }
         if (next.observe === true) {
+          phase = 'feedback';
+          frame = await ctx.region.observe(context.regionId);
+          continue;
+        }
+        if (duplicatePendingAction(next.action, frame, history[history.length - 1])) {
           phase = 'feedback';
           frame = await ctx.region.observe(context.regionId);
           continue;
@@ -131,7 +172,7 @@ export default definePlugin(ctx => {
         // core: the independent plugin interprets this model decision itself.
         phase = 'action';
         await ctx.region.action(context.regionId, next.action);
-        history.push({ step: step + 1, action: next.action });
+        history.push({ step: step + 1, action: next.action, beforeSha256: frame.sha256 });
         phase = 'feedback';
         frame = await ctx.region.observe(context.regionId);
         history[history.length - 1].feedbackSha256 = frame.sha256;

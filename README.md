@@ -43,3 +43,9 @@ MPL-2.0，与 Mewu 一致。
 ![macOS 实测](screenshots/macos-region-014.png)
 
 ![Ubuntu Wayland 实测](screenshots/ubuntu-region-014.png)
+
+## 0.1.5：动作反馈与结果核验
+
+区域决策使用独立上下文，只带当前任务、实际输入记录和最新截图。相同画面下不重复发送同一点击或整段文字，而是继续观察；画面确实变化后仍支持任务所需的连续操作。声明完成前会重新截图并单独核验全部目标，不把输入已经送达或停止操作当作任务完成。
+
+开发回归：`node --experimental-vm-modules --test test.mjs`。测试直接加载本仓库的插件入口，覆盖延迟反馈、防重复输入、完成条件不符、结果未知和有限步骤预算。
