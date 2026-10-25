@@ -42,7 +42,7 @@ MPL-2.0，与 Mewu 一致。
 
 ![macOS 实测](screenshots/macos-region-014.png)
 
-![Ubuntu Wayland 实测](screenshots/ubuntu-region-014.png)
+![Ubuntu Wayland 实测](screenshots/ubuntu-region-014.jpg)
 
 ## 0.1.5：动作反馈与结果核验
 
